@@ -1,0 +1,234 @@
+<!DOCTYPE html>
+<html lang="uz">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>I LOVE YOU – Video Generator</title>
+  <style>
+    :root{ --bg:#000; --text:#fff; --accent:#ff2e63; }
+    *{ box-sizing:border-box }
+    html,body{ height:100%; margin:0 }
+    body{ background:#0b0b0b; color:var(--text); font-family:system-ui, -apple-system, Segoe UI, Inter, Roboto, Arial, sans-serif; }
+
+    .wrap{ max-width:1100px; margin:0 auto; padding:16px; }
+    header{ display:flex; align-items:center; justify-content:space-between; gap:16px; flex-wrap:wrap; }
+    h1{ font-size:20px; margin:0 }
+    .controls{ display:flex; gap:10px; flex-wrap:wrap; align-items:center }
+    .controls > *{ padding:10px 12px; border-radius:10px; border:1px solid #ffffff1a; background:#121212; color:#fff; }
+    .controls input[type="text"], .controls input[type="number"]{ background:#0f0f0f; border-color:#2a2a2a }
+    button{ cursor:pointer }
+    button.primary{ background:var(--accent); border:none; color:#fff; font-weight:700 }
+    .hint{ color:#bdbdbd; font-size:12px }
+
+    .stage{ display:grid; grid-template-columns: 1fr 380px; gap:16px; margin-top:16px }
+    @media (max-width:980px){ .stage{ grid-template-columns:1fr } }
+
+    .phone{ position:relative; width:100%; aspect-ratio:9/16; background:#000; border-radius:18px; overflow:hidden; border:1px solid #1f1f1f }
+    canvas{ width:100%; height:100%; display:block; background:#000 }
+
+    .panel{ background:#0f0f0f; border:1px solid #1f1f1f; border-radius:14px; padding:14px; }
+    .row{ display:flex; align-items:center; justify-content:space-between; gap:10px; margin-bottom:10px }
+    .row label{ color:#d0d0d0; font-size:14px }
+    .row input[type="color"]{ width:46px; height:40px; padding:0; border-radius:10px; border:1px solid #2a2a2a; background:#111 }
+    .out{ margin-top:10px; font-size:14px; color:#cfcfcf; word-break:break-all }
+    a.download{ display:inline-block; margin-top:10px; color:#fff; text-decoration:none; padding:10px 12px; border-radius:10px; background:#1d1d1d; border:1px solid #2a2a2a }
+    a.download:hover{ filter:brightness(1.1) }
+  </style>
+</head>
+<body>
+  <div class="wrap">
+    <header>
+      <h1>❤️ I LOVE YOU – Video Generator (Canvas → WebM)</h1>
+      <div class="controls">
+        <input id="msg" type="text" value="I LOVE YOU" />
+        <button id="record" class="primary">🎥 6s Video yozish</button>
+        <button id="play" title="Preview">▶️ Preview</button>
+        <span class="hint">Natija <b>.webm</b> bo'ladi (Chrome/Edge/Opera/Samsung Internet). 1080×1920, 30fps.</span>
+      </div>
+    </header>
+
+    <div class="stage">
+      <div class="phone">
+        <canvas id="c" width="1080" height="1920"></canvas>
+      </div>
+
+      <div class="panel">
+        <div class="row"><label>Matn rangi</label><input type="color" id="textColor" value="#ffffff"></div>
+        <div class="row"><label>Yurak rangi</label><input type="color" id="heartColor" value="#ff2e63"></div>
+        <div class="row"><label>Yuraklar soni</label><input type="number" id="heartCount" min="5" max="60" value="24"></div>
+        <div class="row"><label>Yurak o'lchami</label><input type="number" id="heartSize" min="30" max="200" value="100"></div>
+        <div class="row"><label>Yorqinlik (glow)</label><input type="number" id="glow" min="0" max="60" value="24"></div>
+        <div class="row"><label>Matn o'lchami</label><input type="number" id="fontSize" min="40" max="220" value="160"></div>
+        <div class="row"><label>Davomiylik (s)</label><input type="number" id="duration" min="3" max="20" value="6"></div>
+        <div class="row"><label>FPS</label><input type="number" id="fps" min="15" max="60" value="30"></div>
+        <div class="out" id="status">Holat: tayyor</div>
+        <a class="download" id="dl" download="i_love_you.webm" href="#" style="display:none">⬇️ Videoni yuklab olish</a>
+      </div>
+    </div>
+  </div>
+
+  <script>
+    const canvas = document.getElementById('c');
+    const ctx = canvas.getContext('2d');
+    const W = canvas.width, H = canvas.height;
+
+    // UI elements
+    const msgEl = document.getElementById('msg');
+    const textColorEl = document.getElementById('textColor');
+    const heartColorEl = document.getElementById('heartColor');
+    const heartCountEl = document.getElementById('heartCount');
+    const heartSizeEl = document.getElementById('heartSize');
+    const glowEl = document.getElementById('glow');
+    const fontSizeEl = document.getElementById('fontSize');
+    const durationEl = document.getElementById('duration');
+    const fpsEl = document.getElementById('fps');
+    const statusEl = document.getElementById('status');
+    const dl = document.getElementById('dl');
+    const btnRecord = document.getElementById('record');
+    const btnPlay = document.getElementById('play');
+
+    // Heart objects
+    let hearts = [];
+    function resetHearts(){
+      const n = Math.max(5, Math.min(60, Number(heartCountEl.value||24)));
+      hearts = new Array(n).fill(0).map(()=> ({
+        x: rand(80, W-80),
+        y: rand(H*0.9, H*1.4),
+        size: rand(Math.max(30, Number(heartSizeEl.value)-40), Number(heartSizeEl.value)+40),
+        speed: rand(40, 120),
+        drift: rand(-20, 20),
+        alpha: rand(0.5, 1),
+        rot: rand(-0.3, 0.3)
+      }));
+    }
+
+    function rand(a,b){ return a + Math.random()*(b-a); }
+
+    function drawHeart(x, y, s, color){
+      // parametric heart using Bezier curves
+      ctx.save();
+      ctx.translate(x, y);
+      ctx.scale(s/100, s/100);
+      ctx.beginPath();
+      ctx.moveTo(0, 30);
+      ctx.bezierCurveTo(0, -30, -60, -30, -60, 10);
+      ctx.bezierCurveTo(-60, 60, 0, 80, 0, 120);
+      ctx.bezierCurveTo(0, 80, 60, 60, 60, 10);
+      ctx.bezierCurveTo(60, -30, 0, -30, 0, 30);
+      ctx.closePath();
+      ctx.fillStyle = color;
+      ctx.fill();
+      ctx.restore();
+    }
+
+    function drawFrame(t){
+      const text = msgEl.value || 'I LOVE YOU';
+      const tColor = textColorEl.value;
+      const hColor = heartColorEl.value;
+      const glow = Math.max(0, Math.min(60, Number(glowEl.value||24)));
+      const fz = Math.max(40, Math.min(220, Number(fontSizeEl.value||160)));
+
+      // background
+      ctx.fillStyle = '#000';
+      ctx.fillRect(0,0,W,H);
+
+      // hearts animation
+      hearts.forEach(h => {
+        h.y -= (h.speed/60); // move up
+        h.x += Math.sin(t*2 + h.y*0.01)*0.4 + (h.drift/600); // slight drift
+        h.rot += 0.003;
+        if (h.y < -160){
+          h.y = rand(H*1.0, H*1.5);
+          h.x = rand(80, W-80);
+        }
+        ctx.globalAlpha = h.alpha;
+        ctx.save();
+        ctx.translate(h.x, h.y);
+        ctx.rotate(h.rot);
+        drawHeart(0,0,h.size,hColor);
+        ctx.restore();
+        ctx.globalAlpha = 1;
+      });
+
+      // title text with glow
+      ctx.save();
+      ctx.textAlign = 'center';
+      ctx.textBaseline = 'middle';
+      ctx.font = `700 ${fz}px system-ui, -apple-system, Segoe UI, Inter, Arial`;
+      if (glow>0){
+        ctx.shadowBlur = glow; ctx.shadowColor = tColor; ctx.fillStyle = tColor;
+      } else { ctx.shadowBlur = 0; ctx.fillStyle = tColor; }
+      ctx.fillText(text, W/2, H*0.33);
+      ctx.restore();
+
+      // subtle footer hint
+      ctx.fillStyle = 'rgba(255,255,255,0.6)';
+      ctx.font = '24px system-ui, Segoe UI';
+      ctx.textAlign = 'center';
+      ctx.fillText('Double-love ❤️ forever', W/2, H*0.92);
+    }
+
+    // Preview loop
+    let previewRAF; let startTs;
+    function preview(){
+      cancelAnimationFrame(previewRAF);
+      startTs = performance.now();
+      const loop = (now)=>{
+        const dt = (now - startTs)/1000;
+        drawFrame(dt);
+        previewRAF = requestAnimationFrame(loop);
+      };
+      loop(startTs);
+    }
+
+    btnPlay.addEventListener('click', ()=>{ resetHearts(); preview(); });
+
+    // Record video using MediaRecorder capturing canvas stream
+    btnRecord.addEventListener('click', async ()=>{
+      const sec = Math.max(3, Math.min(20, Number(durationEl.value||6)));
+      const fps = Math.max(15, Math.min(60, Number(fpsEl.value||30)));
+
+      resetHearts();
+      statusEl.textContent = `Yozilmoqda: ${sec}s, ${fps}fps...`;
+      dl.style.display = 'none';
+
+      const stream = canvas.captureStream(fps);
+      const chunks = [];
+      let options = { mimeType: 'video/webm;codecs=vp9' };
+      if (!MediaRecorder.isTypeSupported(options.mimeType)) {
+        options = { mimeType: 'video/webm;codecs=vp8' };
+      }
+      const rec = new MediaRecorder(stream, options);
+      rec.ondataavailable = e => { if (e.data.size) chunks.push(e.data); };
+      rec.onstop = () => {
+        const blob = new Blob(chunks, { type: options.mimeType });
+        const url = URL.createObjectURL(blob);
+        dl.href = url; dl.download = 'i_love_you.webm';
+        dl.style.display = 'inline-block';
+        statusEl.textContent = `Tayyor! O'lcham: ${(blob.size/1024/1024).toFixed(2)} MB`;
+      };
+
+      // Drive the animation at fixed FPS for determinism
+      const frameInterval = 1000 / fps;
+      let frames = 0; startTs = performance.now();
+
+      function step(){
+        const elapsed = (performance.now() - startTs);
+        drawFrame(elapsed/1000);
+        frames++;
+        if (elapsed < sec*1000){
+          setTimeout(step, Math.max(0, frameInterval - 1));
+        } else {
+          rec.stop();
+        }
+      }
+
+      rec.start(100); // collect data in chunks
+      step();
+    });
+
+    // Start preview on load
+    resetHearts(); preview();
+  </script>
+</body>
+</html>
